@@ -42,7 +42,9 @@ def main(config: DictConfig):
     # Pytorch Lightning treat predict differently compared to what we commonly think of.
     # Must use this context manager and trainer.test to run prediction as expected.
     with on_prediction_mode(pl_module, enable=mode == 'predict'):
-        trainer.test(model=pl_module, datamodule=datamodule, ckpt_path=config.ckpt_path)
+        # [upstream] torch>=2.6 起 torch.load 默认 weights_only=True，PL ckpt 非纯张量会拒载
+        trainer.test(model=pl_module, datamodule=datamodule, ckpt_path=config.ckpt_path,
+                     weights_only=False)
 
     log.info(f"Finished mode='{mode}' on '{data_split}' dataset.")
 

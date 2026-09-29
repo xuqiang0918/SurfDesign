@@ -306,9 +306,15 @@ class EGNN_Layer(MessagePassing):
         else:
             size = self.__check_input__(edge_index, size)
             coll_dict = self.__collect__(self.__user_args__, edge_index, size, kwargs)
-        msg_kwargs = self.inspector.distribute('message', coll_dict)
-        aggr_kwargs = self.inspector.distribute('aggregate', coll_dict)
-        update_kwargs = self.inspector.distribute('update', coll_dict)
+        # [upstream] PyG>=2.6 把 Inspector.distribute() 改名为 collect_param_data()
+        # （Inspector 从 torch_geometric.nn.conv.utils.inspector 挪到
+        #   torch_geometric.inspector）。两者语义一致，这里用 getattr 兼容新旧两个名字。
+        _collect_param = getattr(self.inspector, 'distribute', None)
+        if _collect_param is None:  # PyG >= 2.6
+            _collect_param = self.inspector.collect_param_data
+        msg_kwargs = _collect_param('message', coll_dict)
+        aggr_kwargs = _collect_param('aggregate', coll_dict)
+        update_kwargs = _collect_param('update', coll_dict)
 
         m_ij = self.message(**msg_kwargs)  # get messages
         coors_out = kwargs["coord"]

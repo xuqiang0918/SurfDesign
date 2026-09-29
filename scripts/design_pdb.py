@@ -13,7 +13,7 @@ import pytorch_lightning as pl
 
 from src import utils
 from src.datamodules.datasets import DataProcessor as PDBDataProcessor
-from src.models.fixedbb import IterativeRefinementGenerator
+from src.models.generator import IterativeRefinementGenerator
 from tqdm.auto import tqdm
 
 

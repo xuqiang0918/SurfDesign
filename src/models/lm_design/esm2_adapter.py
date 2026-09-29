@@ -18,9 +18,11 @@ from .modules.esm2_adapter import ESM2WithStructuralAdatper
 
 @dataclass
 class ESM2AdapterConfig:
-    surf_encoder: EGNNConfig = field(default=EGNNConfig())
-    hetero: HeteroGNNConfig = field(default=HeteroGNNConfig())
-    encoder: ProteinMPNNConfig = field(default=ProteinMPNNConfig())
+    # [upstream] py>=3.11 的 dataclasses 以「不可哈希」判定可变默认值，
+    # @dataclass 实例 (__hash__ is None) 会被拒 -> 改用 default_factory（语义等价）
+    surf_encoder: EGNNConfig = field(default_factory=EGNNConfig)
+    hetero: HeteroGNNConfig = field(default_factory=HeteroGNNConfig)
+    encoder: ProteinMPNNConfig = field(default_factory=ProteinMPNNConfig)
     adapter_layer_indices: List = field(default_factory=lambda: [32, ])
     use_bb: bool = False
     separate_loss: bool = True

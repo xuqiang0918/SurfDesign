@@ -14,7 +14,14 @@ import torch
 import torch_cluster
 import trimesh
 from Bio.PDB import PDBParser, Selection, Select
-from Bio.PDB.Polypeptide import one_to_three
+try:  # [upstream] 新版 Biopython 移除了 one_to_three（实测 1.79 有 / 1.88 无）
+    from Bio.PDB.Polypeptide import one_to_three
+except ImportError:  # one_to_three(x) == index_to_three(one_to_index(x))
+    from Bio.PDB.Polypeptide import index_to_three, one_to_index
+
+    def one_to_three(one_letter):
+        return index_to_three(one_to_index(one_letter))
+
 from Bio.PDB.ResidueDepth import get_surface
 from Bio.PDB.PDBIO import PDBIO
 
@@ -434,7 +441,9 @@ class Featurizer(object):
 
         if len(prot_surfs) > 0:
             prot_surfs = Batch.from_data_list(prot_surfs)
-            self.kg(prot_surfs['surface'])
+            # [upstream] PyG>=2.6 的 transform 会先 copy.copy(data) 再 forward，返回新对象；
+            # 返回值必须接住（原地改不了了），否则 edge_index 丢在临时副本上。
+            prot_surfs['surface'].edge_index = self.kg(prot_surfs['surface']).edge_index
 
         coords, confidence, strs, tokens, lengths, coord_mask = self.batcher.from_lists(coords_list=coords, confidence_list=None, seq_list=seqs)
         batch = {'coords': coords, 'tokens': tokens, 'confidence': confidence, 'coord_mask': coord_mask, 'lengths': lengths, 'seqs': seqs, 'names': names, 'prot_surfs': prot_surfs}

@@ -69,7 +69,8 @@ class CMLM(TaskLitModule):
         self.acc_median_best = MaxMetric()
 
     def load_from_ckpt(self, ckpt_path):
-        state_dict = torch.load(ckpt_path, map_location='cpu')['state_dict']
+        # [upstream] 同 test.py：torch>=2.6 的 weights_only 默认值已翻成 True
+        state_dict = torch.load(ckpt_path, map_location='cpu', weights_only=False)['state_dict']
         missing, unexpected = self.load_state_dict(state_dict, strict=False)
         print(f"Restored from {ckpt_path} with {len(missing)} missing and {len(unexpected)} unexpected keys")
         if len(missing) > 0:
