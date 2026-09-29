@@ -21,7 +21,8 @@ from pytorch_lightning.loggers import Logger, TensorBoardLogger
 from pytorch_lightning.utilities import rank_zero_only
 from pytorch_lightning.utilities.seed import isolate_rng
 
-from src.utils import strategies
+from src.utils import accelerator, strategies
+from src.utils.accelerator import accelerator_kwargs  # noqa: F401  [sdaa-adapt]
 from src.utils.config import load_yaml_config, instantiate_from_config, resolve_experiment_config
 
 

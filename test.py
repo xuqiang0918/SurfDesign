@@ -26,7 +26,8 @@ def main(config: DictConfig):
         config.ckpt_path = utils.resolve_ckpt_path(ckpt_dir=config.paths.ckpt_dir, ckpt_path=config.ckpt_path)
     datamodule, pl_module, logger, callbacks = utils.common_pipeline(config)  # loading pipeline
     log.info(f"Instantiating trainer <{config.trainer._target_}>")
-    trainer: Trainer = hydra.utils.instantiate(config.trainer, logger=logger, callbacks=callbacks)  # Init lightning trainer
+    trainer: Trainer = hydra.utils.instantiate(config.trainer, logger=logger, callbacks=callbacks,
+                                               **utils.accelerator_kwargs())  # Init lightning trainer
     if trainer.logger:
         trainer.logger.log_hyperparams({"ckpt_path": config.ckpt_path})   # Log hyperparameters
 

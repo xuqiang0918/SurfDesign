@@ -1,0 +1,5 @@
+__pycache__/
+*.py[cod]
+data/cath_4.3/
+logs/
+test.log

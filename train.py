@@ -34,7 +34,7 @@ def main(config: DictConfig):
     # Init lightning trainer
     log.info(f"Instantiating trainer <{config.trainer._target_}>")
     trainer: Trainer = hydra.utils.instantiate(config.trainer, callbacks=callbacks, logger=logger, _convert_="partial",
-                                               accelerator="gpu" if torch.cuda.is_available() else "cpu")
+                                               **utils.accelerator_kwargs())
 
     # Send some parameters from config to all lightning loggers
     log.info("Logging hyperparameters!")

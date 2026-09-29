@@ -1,0 +1,150 @@
+"""SDAA 设备后端与 Lightning 加速器。
+
+平台事实
+--------
+Teco 的 PyTorch 构建里 ``torch.cuda`` 模块存在，但 ``torch.cuda.is_available()``
+恒为 ``False``；真正的加速器由 ``torch.sdaa`` 暴露，设备字符串是 ``"sdaa"``。
+因此上游所有 ``torch.cuda.is_available()`` 判断在 SDAA 上都会错误地落到 CPU，
+Lightning 的 ``accelerator='auto'`` 也一样 —— 它的自动选择链硬编码为
+tpu / ipu / hpu / cuda -> cpu，不含 SDAA。
+
+用法
+----
+    from src import utils
+    trainer = hydra.utils.instantiate(config.trainer, ..., **utils.accelerator_kwargs())
+
+SDAA 平台返回 ``{"accelerator": SDAAAccelerator(), "devices": 1}``；
+其它平台返回 ``{}``，即完全不改变上游行为。
+
+注意：``accelerator_kwargs`` 由 ``src/utils/__init__.py`` 显式转发（``from
+src.utils.accelerator import accelerator_kwargs``）。仓库里所有工具函数都是
+``utils.xxx`` 这种顶层用法，转发是为了与既有风格保持一致；若删掉那行，
+调用点必须改写成 ``utils.accelerator.accelerator_kwargs()``。
+
+⚠️ 为什么必须传**实例**而不是字符串 ``"sdaa"``
+Lightning 的 ``_AcceleratorConnector._choose_strategy()`` 在单卡场景下写死：
+
+    isinstance(flag, (CUDAAccelerator, MPSAccelerator)) or flag in ("cuda", "gpu", "mps")
+
+不满足就把 device 设成 ``"cpu"``。字符串 ``"sdaa"`` 两条都不满足 → 模型会被静默
+建到 CPU 上；而 ``SDAAAccelerator`` 继承 ``CUDAAccelerator``，传实例即可命中
+``isinstance`` 分支，拿到正确的 ``torch.device("sdaa", 0)``。
+"""
+
+from __future__ import annotations
+
+from typing import Optional, Union
+
+import torch
+
+
+def sdaa_available() -> bool:
+    """SDAA 运行时是否可用（未 source setvars.sh 时 torch.sdaa 会加载失败）。"""
+    try:
+        if not hasattr(torch, "sdaa"):
+            return False
+        return bool(torch.sdaa.is_available())
+    except Exception:
+        return False
+
+
+def device_type() -> str:
+    """返回可直接用于 ``.to()`` 的设备字符串。"""
+    if sdaa_available():
+        return "sdaa"
+    if torch.cuda.is_available():
+        return "cuda"
+    return "cpu"
+
+
+# --------------------------------------------------------------------------- #
+# Lightning 加速器
+# --------------------------------------------------------------------------- #
+try:  # Lightning 是可选依赖：没有 PL 时本模块仍可提供 device_type() 等工具
+    from pytorch_lightning.accelerators import AcceleratorRegistry
+    from pytorch_lightning.accelerators.cuda import CUDAAccelerator
+    from pytorch_lightning.utilities.exceptions import MisconfigurationException
+
+    _HAS_PL = True
+except Exception:  # pragma: no cover
+    _HAS_PL = False
+
+
+if _HAS_PL:
+
+    class SDAAAccelerator(CUDAAccelerator):
+        """Lightning 加速器：把设备映射到 ``torch.sdaa``。
+
+        只覆写必需项；``setup`` / ``teardown`` / ``get_device_stats`` 沿用父类
+        （父类实现里对 CUDA 的调用在 Teco 构建下实测不报错）。
+        """
+
+        @staticmethod
+        def name() -> str:
+            return "sdaa"
+
+        @staticmethod
+        def is_available() -> bool:
+            return sdaa_available()
+
+        @staticmethod
+        def auto_device_count() -> int:
+            return torch.sdaa.device_count() if sdaa_available() else 0
+
+        @staticmethod
+        def parse_devices(devices: Union[int, str, list[int], None]) -> Optional[list[int]]:
+            """父类走 ``_parse_gpu_ids``，会拿 ``torch.cuda.device_count()`` 校验而失败。"""
+            if devices is None:
+                return None
+            if isinstance(devices, str):
+                s = devices.strip()
+                if s in ("", "0", "[]"):
+                    return None
+                if s in ("-1", "auto"):
+                    return list(range(SDAAAccelerator.auto_device_count()))
+                return [int(x) for x in s.split(",") if x.strip()]
+            if isinstance(devices, int):
+                if devices == 0:
+                    return None
+                return list(range(devices))
+            if isinstance(devices, (list, tuple)):
+                return [int(x) for x in devices]
+            return None
+
+        @staticmethod
+        def get_parallel_devices(devices: list[int]) -> list[torch.device]:
+            return [torch.device("sdaa", int(i)) for i in devices]
+
+        def setup_device(self, device: torch.device) -> None:
+            if device.type != "sdaa":
+                raise MisconfigurationException(f"Device should be SDAA, got {device} instead")
+            torch.sdaa.set_device(device)
+
+
+    # 显式注册。必须在这里做，否则 accelerate='sdaa' / AcceleratorRegistry.get("sdaa")
+    # 都会报 'sdaa' not found（AcceleratorRegistry 是全局单例，注册后在
+    # AcceleratorConnector 构造 Trainer 时即可见）。
+    if "sdaa" not in AcceleratorRegistry.available_accelerators():
+        AcceleratorRegistry.register("sdaa", SDAAAccelerator, description="SDAAAccelerator")
+
+
+def accelerator_kwargs(devices: Optional[int] = 1) -> dict:
+    """返回 ``Trainer(...)`` 的设备相关覆盖参数。
+
+    SDAA 平台：``{"accelerator": SDAAAccelerator(), "devices": <devices>}``；
+    其它平台：``{}``（保持上游 ``accelerator='auto'`` 的原有行为）。
+    """
+    if not (_HAS_PL and sdaa_available()):
+        return {}
+    kwargs: dict = {"accelerator": SDAAAccelerator()}
+    if devices is not None:
+        kwargs["devices"] = devices
+    return kwargs
+
+
+__all__ = [
+    "SDAAAccelerator",
+    "accelerator_kwargs",
+    "device_type",
+    "sdaa_available",
+]
